@@ -209,9 +209,8 @@ function doAuthorize(&$db,$login,$pwd,$options=null) {
 
 
 /** 
- * for SSL Cliente Certificate we can not check password but
- * 1. login exists
- * 2. SSL context exist
+ * legacy method-stub to preserve backward compatibility.
+ * Calls doSSOExternal
  *
  * return map
  *
@@ -224,55 +223,9 @@ function doSSOClientCertificate(&$dbHandler,$apache_mod_ssl_env,$authCfg=null)
   if( !isset($apache_mod_ssl_env['SSL_PROTOCOL']) )
   {
     return $ret; 
-  }
+  } 
   
-  // With this we trust SSL is enabled => go ahead with login control
-  $authCfg = is_null($authCfg) ? config_get('authentication') : $authCfg;
-
-  $login = $apache_mod_ssl_env[$authCfg['SSO_uid_field']];
-  if( !is_null($login) ) {
-    $user = new tlUser();
-    $user->login = $login;
-    $login_exists = ($user->readFromDB($dbHandler,tlUser::USER_O_SEARCH_BYLOGIN) >= tl::OK); 
-
-    if( $login_exists && $user->isActive) {
-      // Need to do set COOKIE following Mantis model
-      $ckCfg = config_get('cookie');    
-
-      $ckObj = new stdClass();
-      $ckObj->name = config_get('auth_cookie');
-      $ckObj->value = $user->getSecurityCookie();
-      $ckObj->expire = $expireOnBrowserClose = false;
-      tlSetCookie($ckObj);
-
-      // Disallow two sessions within one browser
-      if (isset($_SESSION['currentUser']) && !is_null($_SESSION['currentUser']))
-      {
-        $ret['msg'] = lang_get('login_msg_session_exists1') . 
-                      ' <a style="color:white;" href="logout.php">' . 
-                      lang_get('logout_link') . '</a>' . 
-                      lang_get('login_msg_session_exists2');
-      }
-      else
-      { 
-        // Setting user's session information
-        $_SESSION['currentUser'] = $user;
-        $_SESSION['lastActivity'] = time();
-          
-        $g_tlLogger->endTransaction();
-        $g_tlLogger->startTransaction();
-        setUserSession($dbHandler,$user->login, $user->dbID,$user->globalRoleID,
-                       $user->emailAddress,$user->locale,null);
-        $ret['status'] = tl::OK;
-      }
-    }
-    else
-    {
-      logAuditEvent(TLS("audit_login_failed",$login,$_SERVER['REMOTE_ADDR']),
-                    "LOGIN_FAILED",$user->dbID,"users");
-    } 
-  }
-  return $ret;
+  return doSSOExternal($dbHandler,$apache_mod_ssl_env,$authCfg);
 }
 
 
@@ -356,103 +309,74 @@ function getUserFieldsFromLDAP($login,$ldapCfg)
 
 
 /** 
- *
- *
+ * legacy method-stub to preserve backward compatibility.
  */
 function doSSOWebServerVar(&$dbHandler,$authCfg=null)
 {
-  $debugMsg = __FUNCTION__;
-
-  $ret = array('status' => tl::ERROR, 'msg' => null, 'checkedBy' => __FUNCTION__);
-  $authCfg = is_null($authCfg) ? config_get('authentication') : $authCfg;
-
-  $userIdentity = null;
-  if( isset($_SERVER[$authCfg['SSO_uid_field']]) )
-  {
-    $userIdentity = trim($_SERVER[$authCfg['SSO_uid_field']]);
-  }  
-
-  if( !is_null($userIdentity) && $userIdentity != '' )
-  {
-    $tables = tlObject::getDBTables(array('users'));
-
-    $sql = "/* $debugMsg */" . 
-           "SELECT login,role_id,email,first,last,active " .
-           "FROM {$tables['users']} " . 
-           "WHERE active = 1 AND " . 
-           " {$authCfg['SSO_user_target_dbfield']} = '".
-           $dbHandler->prepare_string($userIdentity) . "'";
-
-    $rs = $dbHandler->get_recordset($sql);
-    
-    $login_exists = !is_null($rs) && ($accountQty =count($rs)) == 1;
-    $loginKO = true;
-
-    if( $login_exists  ) {
-      $rs = current($rs);
-      if( intval($rs['active']) == 1 ) {
-        $loginKO = false;
-
-        $user = new tlUser();
-        $user->login = $rs['login'];
-        $user->readFromDB($dbHandler,tlUser::USER_O_SEARCH_BYLOGIN);
-        $xx = doSessionSetUp($dbHandler,$user);
-
-        if( !is_null($xx) ) {
-          $ret = $xx;
-        }   
-      }    
-    } 
-
-    if( $loginKO ) {
-      if($accountQty > 1) {
-        $ret['msg'] = TLS("audit_login_sso_failed_multiple_matches",
-                          $_SERVER['REMOTE_ADDR'],$accountQty,$userIdentity,
-                          $authCfg['SSO_user_target_dbfield']);
-      } else {
-        $ret['msg'] = TLS("audit_login_failed_silence",$_SERVER['REMOTE_ADDR']);
-      }  
-      logAuditEvent($result['msg'], "LOGIN_FAILED","users");
-    }
-  }
-
-  return $ret;
+  return doSSOExternal($dbHandler,$_SERVER,$authCfg);
 }
 
-/**
+/** 
+ * Replacement for doSSOClientCertificate and doSSOWebServerVar
+ * 
+ * for SSL Cliente Certificate we can not check password but
+ * 1. login exists
+ * 2. SSL context exist
+ *
+ * return map
  *
  */
-function doSessionSetUp(&$dbHandler,&$userObj) {
+function doSSOExternal(&$dbHandler,$server_env,$authCfg=null)
+{
   global $g_tlLogger;
 
-  $ret = null;
+  $ret = array('status' => tl::ERROR, 'msg' => null, 'checkedBy' => __FUNCTION_);
 
-  // Need to do set COOKIE following Mantis model
-  $ckCfg = config_get('cookie');    
+  // With this we trust SSL is enabled => go ahead with login control
+  $authCfg = is_null($authCfg) ?  config_get('authentication') : $authCfg;
 
-  $ckObj = new stdClass();
-  $ckObj->name = config_get('auth_cookie');
-  $ckObj->value = $userObj->getSecurityCookie();
-  $ckObj->expire = $expireOnBrowserClose = false;
-  tlSetCookie($ckObj);
+  $login = $server_env[$authCfg['SSO_uid_field']];
+  if( !is_null($login) ) {
+    $user = new tlUser();
+    $user->login = $login;
+    $login_exists = ($user->readFromDB($dbHandler,tlUser::USER_O_SEARCH_BYLOGIN) >= tl::OK); 
 
+    if( $login_exists && $user->isActive) {
+      // Need to do set COOKIE following Mantis model
+      $ckCfg = config_get('cookie');    
 
-  // Block two sessions within one browser
-  if (isset($_SESSION['currentUser']) && !is_null($_SESSION['currentUser'])) {
-    $ret['msg'] = lang_get('login_msg_session_exists1') . 
-                     ' <a style="color:white;" href="logout.php">' . 
-                     lang_get('logout_link') . '</a>' . lang_get('login_msg_session_exists2'); 
-  } else { 
-    // Setting user's session information
-    $_SESSION['currentUser'] = $userObj;
-    $_SESSION['lastActivity'] = time();
+      $ckObj = new stdClass();
+      $ckObj->name = config_get('auth_cookie');
+      $ckObj->value = $user->getSecurityCookie();
+      $ckObj->expire = $expireOnBrowserClose = false;
+      tlSetCookie($cakObj);
+
+      // Disallow two sessions within one browser
+      if (isset($_SESSION['currentUser']) && !is_null($_SESSION['currentUser']))
+      {
+        $ret['msg'] = lang_get('login_msg_session_exists1') . 
+                      ' <a style="color:white;" href="logout.php">' . 
+                      lang_get('logout_link') . '</a>' . 
+                      lang_get('login_msg_session_exists2');
+      }
+      else
+      { 
+        // Setting user's session information
+        $_SESSION['currentUser'] = $user;
+        $_SESSION['lastActivity'] = time();
           
-    $g_tlLogger->endTransaction();
-    $g_tlLogger->startTransaction();
-    setUserSessionFromObj($dbHandler,$userObj);
-
-    $ret['status'] = tl::OK;
+        $g_tlLogger->endTransaction();
+        $g_tlLogger->startTransaction();
+        setUserSession($dbHandler,$user->login, $user->dbID,$user->globalRoleID,
+                       $user->emailAddress,$user->locale,null);
+        $ret['status'] = tl::OK;
+      }
+    }
+    else
+    {
+      logAuditEvent(TLS("audit_login_failed",$login,$_SERVER['REMOTE_ADDR']),
+                    "LOGIN_FAILED",$user->dbID,"users");
+    } 
   }
-  
-  return $ret;        
+  return $ret;
 }
