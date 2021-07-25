@@ -349,7 +349,7 @@ function doSSOExternal(&$dbHandler,$server_env,$authCfg=null)
       $ckObj->name = config_get('auth_cookie');
       $ckObj->value = $user->getSecurityCookie();
       $ckObj->expire = $expireOnBrowserClose = false;
-      tlSetCookie($cakObj);
+      tlSetCookie($ckObj);
 
       // Disallow two sessions within one browser
       if (isset($_SESSION['currentUser']) && !is_null($_SESSION['currentUser']))
